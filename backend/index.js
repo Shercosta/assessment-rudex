@@ -232,7 +232,7 @@ app.get("/api/search", async (req, res) => {
   }
 
   // search from elasticsearch
-  const { body } = await es.search({
+  const result = await es.search({
     index: "news",
     body: {
       query: {
@@ -243,9 +243,25 @@ app.get("/api/search", async (req, res) => {
     },
   });
 
-  console.log(body);
+  const hits = result.hits.hits;
 
-  // return res.json(body.hits.hits);
+  let response = [];
+
+  if (Array.isArray(hits)) {
+    hits.forEach((hit) => {
+      response.push({
+        id: hit._id,
+        title: hit._source.title,
+        content: hit._source.content,
+        author: hit._source.author,
+        source: hit._source.source,
+        created_at: hit._source.created_at,
+      });
+    });
+  }
+
+  return res.json(response);
+  // return res.json("ok");
 });
 
 console.log("running at port 3000");
