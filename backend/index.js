@@ -2,6 +2,7 @@ const express = require("express");
 const { Pool } = require("pg");
 const { slugify } = require("./utils");
 const { connectRabbit, getChannel } = require("./rabbit");
+const { Client } = require("@elastic/elasticsearch");
 
 const app = express();
 
@@ -17,6 +18,18 @@ app.use(express.json());
     console.error("Rabbit MQ connection error:", error);
     process.exit(1);
   }
+})();
+
+// #region ES
+// #endregion
+
+const es = new Client({
+  node: "http://localhost:9200",
+});
+
+(async () => {
+  await es.ping();
+  console.log(">>> Elasticsearch connected");
 })();
 
 // #region DB Connect
