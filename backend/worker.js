@@ -2,7 +2,7 @@ const amqp = require("amqplib");
 const { Client } = require("@elastic/elasticsearch");
 
 const es = new Client({
-  node: "http://localhost:9200",
+  node: process.env.ELASTICSEARCH_URL || "http://elasticsearch:9200",
 });
 
 async function ensureIndex() {
@@ -26,10 +26,28 @@ async function ensureIndex() {
   }
 }
 
+async function connectRMQ(retries = 10) {
+  while (retries > 0) {
+    try {
+      const connection = await amqp.connect(
+        process.env.RABBITMQ_URL || "amqp://rabbitmq:5672"
+      );
+      console.log(">>> Worker + RabbitMQ");
+      return connection;
+    } catch (error) {
+      retries--;
+      console.log(`>>> Waiting for RabbitMQ, ${retries} attempts left`);
+      await new Promise((res) => setTimeout(res, 5000));
+    }
+  }
+
+  throw new Error("<<< RabbitMQ not available");
+}
+
 async function startWorker() {
   await ensureIndex();
 
-  const connection = await amqp.connect("amqp://localhost:5672");
+  const connection = await connectRMQ();
   const channel = await connection.createChannel();
 
   await channel.assertQueue("news_queue", {

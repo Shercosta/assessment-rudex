@@ -24,38 +24,111 @@ app.use(express.json());
 // #endregion
 
 const es = new Client({
-  node: "http://localhost:9200",
+  node: process.env.ELASTICSEARCH_URL || "http://elasticsearch:9200",
 });
 
+async function waitForElasticsearch(retries = 10, delay = 3000) {
+  while (retries > 0) {
+    try {
+      await es.ping();
+      console.log("✅ Elasticsearch connected");
+      return;
+    } catch (err) {
+      retries--;
+      console.log(`⏳ Waiting for Elasticsearch... ${retries} attempts left`);
+      await new Promise((res) => setTimeout(res, delay));
+    }
+  }
+  throw new Error("❌ Could not connect to Elasticsearch after retries");
+}
+
 (async () => {
-  await es.ping();
-  console.log(">>> Elasticsearch connected");
+  await waitForElasticsearch();
+  console.log("🚀 All services ready, starting API...");
 })();
+
+async function ensureIndex() {
+  const exists = await es.indices.exists({ index: "news" });
+
+  if (!exists) {
+    await es.indices.create({
+      index: "news",
+      mappings: {
+        properties: {
+          title: { type: "text" },
+          content: { type: "text" },
+          author: { type: "text" },
+          source: { type: "text" },
+          created_at: { type: "date" },
+        },
+      },
+    });
+
+    console.log(">>> Created ES Index 'news'");
+  }
+}
+
+(async () => {
+  await ensureIndex();
+})();
+
+// (async () => {
+//   await es.ping();
+//   console.log(">>> Elasticsearch connected");
+// })();
 
 // #region DB Connect
 // #endregion
 
-const pool = new Pool({
-  host: "localhost",
-  port: 5432,
-  user: "postgres",
-  password: "postgres",
-  database: "assesment_rudex",
-});
+let globalPool;
 
-pool
-  .query("SELECT 1")
-  .then(() => {
-    console.log("DB Connected");
-  })
-  .catch((err) => {
-    console.error(err);
+async function createPool(retries = 10, delay = 5000) {
+  const newPool = new Pool({
+    host: process.env.DB_HOST,
+    port: Number(process.env.DB_PORT),
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
   });
+
+  while (retries > 0) {
+    try {
+      await newPool.query("SELECT 1");
+      console.log(">>> Postgres connected");
+      globalPool = newPool;
+      return newPool;
+    } catch (error) {
+      retries--;
+      console.log(`>>> Waiting for PGSQL, ${retries} attempts left`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+
+  throw new Error("<<< Postgres not available");
+}
+
+// async function waitForDb(retries = 10) {
+//   while (retries) {
+//     try {
+//       await pool.query("SELECT 1");
+//       console.log("✅ Postgres connected");
+//       return;
+//     } catch (err) {
+//       retries--;
+//       console.log("⏳ Waiting for Postgres...");
+//       await new Promise((res) => setTimeout(res, 5000));
+//     }
+//   }
+//   throw new Error("❌ Postgres not available");
+// }
+
+// waitForDb();
 
 // #region Migration
 // #endregion
 
 async function migrate() {
+  const pool = await createPool();
   const client = await pool.connect();
 
   try {
@@ -119,9 +192,9 @@ app
 
     try {
       try {
-        await pool.query("BEGIN");
+        await globalPool.query("BEGIN");
 
-        const { rows } = await pool.query(
+        const { rows } = await globalPool.query(
           `
         INSERT INTO news (id, title, content, author, source)
         VALUES ($1, $2, $3, $4, $5)
@@ -140,7 +213,7 @@ app
           { persistent: true }
         );
 
-        await pool.query("COMMIT");
+        await globalPool.query("COMMIT");
 
         return res.status(201).json({
           status: "ok",
@@ -148,7 +221,7 @@ app
           id: news.id,
         });
       } catch (error) {
-        await pool.query("ROLLBACK");
+        await globalPool.query("ROLLBACK");
         throw error;
       }
     } catch (error) {
@@ -195,7 +268,7 @@ app
       where = `WHERE ${where.join(" AND ")}`;
     }
 
-    const count = await pool.query(
+    const count = await globalPool.query(
       `SELECT COUNT(*)::int AS total FROM news ${where}`,
       values
     );
@@ -211,7 +284,7 @@ app
     `;
 
     const dataV = [...values, limit, offset];
-    const { rows } = await pool.query(dataQ, dataV);
+    const { rows } = await globalPool.query(dataQ, dataV);
 
     return res.json({
       page,
@@ -261,7 +334,6 @@ app.get("/api/search", async (req, res) => {
   }
 
   return res.json(response);
-  // return res.json("ok");
 });
 
 console.log("running at port 3000");

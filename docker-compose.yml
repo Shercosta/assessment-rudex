@@ -3,26 +3,36 @@ version: "3.9"
 services:
   postgres:
     image: postgres:16
+    container_name: postgres
     ports:
-      - 5432:5432
+      - "5432:5432"
     volumes:
       - ~/apps/postgres:/var/lib/postgresql/data
     environment:
-      - POSTGRES_DB=assesment_rudex
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      POSTGRES_DB: assesment_rudex
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d assesment_rudex"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - backend_net
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
-    container_name: "rabbitmq-local"
+    container_name: rabbitmq
     ports:
-      - 5672:5672
-      - 15672:15672
-    volumes:
-      - ~/.docker-conf/rabbitmq/data/:/var/lib/rabbitmq/
-      - ~/.docker-conf/rabbitmq/log/:/var/log/rabbitmq
+      - "5672:5672"
+      - "15672:15672"
     networks:
-      - rabbitmq_net
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmqctl status"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:9.2.2
@@ -30,20 +40,70 @@ services:
     ports:
       - "9200:9200"
     environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
     volumes:
       - esdata:/usr/share/elasticsearch/data
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:9200 || exit 1"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+    networks:
+      - backend_net
+
+  api:
+    build:
+      context: ./backend
+    container_name: api
+    command: nodemon index.js
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: assesment_rudex
+      RABBITMQ_URL: amqp://rabbitmq:5672
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    networks:
+      - backend_net
+
+  worker:
+    build:
+      context: ./backend
+    container_name: worker
+    command: node worker.js
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: assesment_rudex
+      RABBITMQ_URL: amqp://rabbitmq:5672
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    networks:
+      - backend_net
 
 volumes:
   esdata:
 
 networks:
-  rabbitmq_net:
+  backend_net:
     driver: bridge
