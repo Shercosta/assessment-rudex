@@ -7,3 +7,5 @@
 3. Get in the directory of this project
 4. Run `docker compose up --build`
 5. Test everything in postman
+
+No need to figure out env since i have embed the env in the docker-compose.yml file.
