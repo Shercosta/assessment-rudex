@@ -221,6 +221,33 @@ app
     });
   });
 
+app.get("/api/search", async (req, res) => {
+  const { search } = req.query;
+
+  if (!search) {
+    res.status(400).json({
+      status: "error",
+      message: "Missing required query parameter: search",
+    });
+  }
+
+  // search from elasticsearch
+  const { body } = await es.search({
+    index: "news",
+    body: {
+      query: {
+        match: {
+          title: search,
+        },
+      },
+    },
+  });
+
+  console.log(body);
+
+  // return res.json(body.hits.hits);
+});
+
 console.log("running at port 3000");
 
 app.listen(3000);
