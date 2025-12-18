@@ -1,10 +1,23 @@
 const express = require("express");
 const { Pool } = require("pg");
 const { slugify } = require("./utils");
+const { connectRabbit, getChannel } = require("./rabbit");
 
 const app = express();
 
 app.use(express.json());
+
+// #region RMQ
+// #endregion
+
+(async () => {
+  try {
+    await connectRabbit();
+  } catch (error) {
+    console.error("Rabbit MQ connection error:", error);
+    process.exit(1);
+  }
+})();
 
 // #region DB Connect
 // #endregion
@@ -26,7 +39,7 @@ pool
     console.error(err);
   });
 
-// #region DB Migration
+// #region Migration
 // #endregion
 
 async function migrate() {
@@ -105,6 +118,14 @@ app
         );
 
         const news = rows[0];
+
+        // rmq q
+        const rmcChannel = getChannel();
+        rmcChannel.sendToQueue(
+          "news_queue",
+          Buffer.from(JSON.stringify(news)),
+          { persistent: true }
+        );
 
         await pool.query("COMMIT");
 
